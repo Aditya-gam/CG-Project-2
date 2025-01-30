@@ -47,9 +47,24 @@ void vertex_shader_color2(const data_vertex& in, data_geometry& out,
 void vertex_shader_transform(const data_vertex& in, data_geometry& out,
     const float * uniform_data)
 {
-    vertex_p& v = *(vertex_p*)in.data;
-    mat4& xform = *(mat4*)uniform_data;
-    out.gl_Position = xform * vec4(v.position,1);
+    // Extract the transformation matrix from uniform_data
+    const mat4& xform = *(const mat4*)uniform_data;
+
+    // Read the input vertex position
+    const vertex_p& v = *(const vertex_p*)in.data;
+
+    // Apply the transformation matrix (Projection * ModelView * Vertex)
+    vec4 transformed = xform * vec4(v.position, 1.0f);
+
+    // **Perform Homogeneous Division**
+    if (transformed[3] != 0.0f) {
+        transformed[0] /= transformed[3];
+        transformed[1] /= transformed[3];
+        transformed[2] /= transformed[3];  // Depth normalization
+    }
+
+    // Assign the transformed vertex position
+    out.gl_Position = transformed;
 }
 
 // Simple fragment shader: set the fragment to red

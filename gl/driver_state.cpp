@@ -65,7 +65,6 @@ void clip_triangle(driver_state& state, const data_geometry& v0,
 // Barycentric coordinate method for rasterization
 void rasterize_triangle(driver_state& state, const data_geometry& v0,
                         const data_geometry& v1, const data_geometry& v2) {
-    // Convert NDC to screen coordinates
     auto ndc_to_screen = [&](vec4 v) -> vec2 {
         return vec2((v[0] * 0.5f + 0.5f) * state.image_width,
                     (v[1] * 0.5f + 0.5f) * state.image_height);
@@ -75,7 +74,6 @@ void rasterize_triangle(driver_state& state, const data_geometry& v0,
     vec2 p1 = ndc_to_screen(v1.gl_Position);
     vec2 p2 = ndc_to_screen(v2.gl_Position);
 
-    // Compute bounding box of the triangle
     std::array<float, 3> x_values = {p0[0], p1[0], p2[0]};
     std::array<float, 3> y_values = {p0[1], p1[1], p2[1]};
 
@@ -84,7 +82,6 @@ void rasterize_triangle(driver_state& state, const data_geometry& v0,
     int min_y = std::max(0, static_cast<int>(std::floor(*std::min_element(y_values.begin(), y_values.end()))));
     int max_y = std::min(state.image_height - 1, static_cast<int>(std::ceil(*std::max_element(y_values.begin(), y_values.end()))));
 
-    // Compute edge functions
     auto edge_function = [](const vec2& a, const vec2& b, const vec2& c) -> float {
         return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
     };
@@ -92,33 +89,31 @@ void rasterize_triangle(driver_state& state, const data_geometry& v0,
     float area = edge_function(p0, p1, p2);
     if (area == 0) return; // Skip degenerate triangles
 
-    // Iterate over the bounding box
     for (int y = min_y; y <= max_y; y++) {
         for (int x = min_x; x <= max_x; x++) {
-            vec2 p = vec2(x + 0.5f, y + 0.5f); // Sample at pixel center
+            vec2 p = vec2(x + 0.5f, y + 0.5f);
 
-            // Compute barycentric coordinates
             float w0 = edge_function(p1, p2, p) / area;
             float w1 = edge_function(p2, p0, p) / area;
             float w2 = edge_function(p0, p1, p) / area;
 
-            // Check if the pixel is inside the triangle
             if (w0 >= 0 && w1 >= 0 && w2 >= 0) {
                 int pixel_index = y * state.image_width + x;
 
-                // Interpolate depth
-                float depth = w0 * v0.gl_Position[2] + w1 * v1.gl_Position[2] + w2 * v2.gl_Position[2];
+                // **Fix depth interpolation**
+                float z0 = v0.gl_Position[2] / v0.gl_Position[3];
+                float z1 = v1.gl_Position[2] / v1.gl_Position[3];
+                float z2 = v2.gl_Position[2] / v2.gl_Position[3];
 
-                // Depth test (z-buffering)
+                float depth = w0 * z0 + w1 * z1 + w2 * z2;
+
                 if (depth < state.image_depth[pixel_index]) {
                     state.image_depth[pixel_index] = depth;
 
-                    // Call fragment shader to determine color
                     data_fragment fragment;
                     data_output output;
                     state.fragment_shader(fragment, output, state.uniform_data);
 
-                    // Convert color to pixel format
                     int r = std::min(255, static_cast<int>(output.output_color[0] * 255));
                     int g = std::min(255, static_cast<int>(output.output_color[1] * 255));
                     int b = std::min(255, static_cast<int>(output.output_color[2] * 255));
@@ -129,3 +124,4 @@ void rasterize_triangle(driver_state& state, const data_geometry& v0,
         }
     }
 }
+
