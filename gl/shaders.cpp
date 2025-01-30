@@ -33,15 +33,23 @@ void vertex_shader_color(const data_vertex& in, data_geometry& out,
 }
 
 // This shader (1) transforms vertices and (2) copies over colors.
-void vertex_shader_color2(const data_vertex& in, data_geometry& out,
-    const float * uniform_data)
+void vertex_shader_color2(const data_vertex& in, data_geometry& out, const float * uniform_data)
 {
     const vertex_pc2& v = *(const vertex_pc2*)in.data;
-    vertex_pc2& o = *(vertex_pc2*)out.data;
+    
+    // Allocate memory for the output attributes
+    out.data = new float[MAX_FLOATS_PER_VERTEX]();
+
+    // Apply transformation
     mat4& xform = *(mat4*)uniform_data;
     out.gl_Position = xform * vec4(v.position,1);
-    o.color = v.color;
+
+    // Copy color data
+    out.data[0] = v.color[0];  // R
+    out.data[1] = v.color[1];  // G
+    out.data[2] = v.color[2];  // B
 }
+
 
 // This shader just transforms vertices
 void vertex_shader_transform(const data_vertex& in, data_geometry& out,
@@ -112,11 +120,19 @@ void fragment_shader_gouraud(const data_fragment& in, data_output& out,
 }
 
 // Simple fragment shader: pass through interpolated per-vertex color
-void fragment_shader_gouraud2(const data_fragment& in, data_output& out,
-    const float * uniform_data)
+void fragment_shader_gouraud2(const data_fragment& in, data_output& out, const float * uniform_data)
 {
-    vertex_pc2& v = *(vertex_pc2*)in.data;
-    out.output_color = vec4(v.color,0);
+    if (!in.data) {
+        out.output_color = vec4(1, 1, 1, 1);  // Default to white if no data
+        return;
+    }
+
+    vec3 color;
+    color[0] = in.data[0];  // R
+    color[1] = in.data[1];  // G
+    color[2] = in.data[2];  // B
+
+    out.output_color = vec4(color, 1);
 }
 
 // Assign shaders to the maps so they can be accessed by name.
