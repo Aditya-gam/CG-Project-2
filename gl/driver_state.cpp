@@ -3,7 +3,7 @@
 #include <cmath>
 #include <iostream>
 #include <algorithm>
-#include <array> // Required for std::array
+#include <array>
 
 driver_state::driver_state() {}
 
@@ -100,7 +100,7 @@ void rasterize_triangle(driver_state& state, const data_geometry& v0,
             if (w0 >= 0 && w1 >= 0 && w2 >= 0) {
                 int pixel_index = y * state.image_width + x;
 
-                // **Fix depth interpolation**
+                // **Corrected Depth Interpolation**
                 float z0 = v0.gl_Position[2] / v0.gl_Position[3];
                 float z1 = v1.gl_Position[2] / v1.gl_Position[3];
                 float z2 = v2.gl_Position[2] / v2.gl_Position[3];
@@ -114,17 +114,20 @@ void rasterize_triangle(driver_state& state, const data_geometry& v0,
                     data_fragment fragment;
                     fragment.data = new float[MAX_FLOATS_PER_VERTEX]();
 
-                    // Interpolate attributes based on interpolation type
+                    // **Corrected Attribute Interpolation**
                     for (int i = 0; i < state.floats_per_vertex; i++) {
                         if (state.interp_rules[i] == interp_type::smooth) {
+                            // Perspective-correct interpolation
+                            float w_div_z = w0 / v0.gl_Position[3] + w1 / v1.gl_Position[3] + w2 / v2.gl_Position[3];
                             fragment.data[i] = (w0 * v0.data[i] / v0.gl_Position[3] +
                                                 w1 * v1.data[i] / v1.gl_Position[3] +
-                                                w2 * v2.data[i] / v2.gl_Position[3]) /
-                                               (w0 / v0.gl_Position[3] + w1 / v1.gl_Position[3] + w2 / v2.gl_Position[3]);
+                                                w2 * v2.data[i] / v2.gl_Position[3]) / w_div_z;
                         } else if (state.interp_rules[i] == interp_type::noperspective) {
+                            // Image-space barycentric interpolation
                             fragment.data[i] = w0 * v0.data[i] + w1 * v1.data[i] + w2 * v2.data[i];
                         } else if (state.interp_rules[i] == interp_type::flat) {
-                            fragment.data[i] = v0.data[i];  // Use first vertex's data
+                            // Flat interpolation (first vertex attribute)
+                            fragment.data[i] = v0.data[i];
                         }
                     }
 
