@@ -110,7 +110,20 @@ void rasterize_triangle(driver_state& state, const data_geometry& v0,
                 if (depth < state.image_depth[pixel_index]) {
                     state.image_depth[pixel_index] = depth;
 
+                    // Allocate memory for interpolated attributes
                     data_fragment fragment;
+                    fragment.data = new float[MAX_FLOATS_PER_VERTEX]();
+
+                    // Interpolate attributes based on interpolation type
+                    for (int i = 0; i < state.floats_per_vertex; i++) {
+                        if (state.interp_rules[i] == interp_type::smooth) {
+                            fragment.data[i] = w0 * v0.data[i] + w1 * v1.data[i] + w2 * v2.data[i];
+                        } else if (state.interp_rules[i] == interp_type::flat) {
+                            fragment.data[i] = v0.data[i];  // Use first vertex's data
+                        }
+                    }
+
+                    // Process the fragment
                     data_output output;
                     state.fragment_shader(fragment, output, state.uniform_data);
 
@@ -119,9 +132,11 @@ void rasterize_triangle(driver_state& state, const data_geometry& v0,
                     int b = std::min(255, static_cast<int>(output.output_color[2] * 255));
 
                     state.image_color[pixel_index] = make_pixel(r, g, b);
+
+                    // Cleanup allocated memory
+                    delete[] fragment.data;
                 }
             }
         }
     }
 }
-
