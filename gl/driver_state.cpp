@@ -337,80 +337,87 @@ vec3 compute_barycentric(const vec3& A, const vec3& B, const vec3& C, const vec3
 void rasterize_triangle(driver_state& state, const data_geometry& v0,
                         const data_geometry& v1, const data_geometry& v2)
 {
-    vec3 screen_v0 = to_screen_space(v0.gl_Position, state.image_width, state.image_height);
-    vec3 screen_v1 = to_screen_space(v1.gl_Position, state.image_width, state.image_height);
-    vec3 screen_v2 = to_screen_space(v2.gl_Position, state.image_width, state.image_height);
+    // Convert NDC coordinates to screen space
+    auto ndc_to_screen = [&](const vec4& v) -> vec3 {
+        return vec3(
+            (v[0] * 0.5f + 0.5f) * state.image_width,
+            (v[1] * 0.5f + 0.5f) * state.image_height,
+            v[2]
+        );
+    };
 
-    int min_x = std::max(0, (int)std::min({screen_v0[0], screen_v1[0], screen_v2[0]}));
-    int max_x = std::min(state.image_width - 1, (int)std::max({screen_v0[0], screen_v1[0], screen_v2[0]}));
-    int min_y = std::max(0, (int)std::min({screen_v0[1], screen_v1[1], screen_v2[1]}));
-    int max_y = std::min(state.image_height - 1, (int)std::max({screen_v0[1], screen_v1[1], screen_v2[1]}));
+    vec3 p0 = ndc_to_screen(v0.gl_Position);
+    vec3 p1 = ndc_to_screen(v1.gl_Position);
+    vec3 p2 = ndc_to_screen(v2.gl_Position);
+
+    int min_x = std::max(0, (int)std::min({p0[0], p1[0], p2[0]}));
+    int max_x = std::min(state.image_width - 1, (int)std::max({p0[0], p1[0], p2[0]}));
+    int min_y = std::max(0, (int)std::min({p0[1], p1[1], p2[1]}));
+    int max_y = std::min(state.image_height - 1, (int)std::max({p0[1], p1[1], p2[1]}));
+
+    auto edge_function = [](const vec3& a, const vec3& b, const vec3& c) -> float {
+        return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+    };
+
+    float area = edge_function(p0, p1, p2);
+    if (area == 0) return; // Skip degenerate triangles
 
     for (int y = min_y; y <= max_y; y++) {
         for (int x = min_x; x <= max_x; x++) {
             vec3 p(x + 0.5f, y + 0.5f, 0);
-            vec3 barycentric = compute_barycentric(screen_v0, screen_v1, screen_v2, p);
-            if (barycentric[0] < 0 || barycentric[1] < 0 || barycentric[2] < 0)
-                continue;
 
-            float depth = barycentric[0] * screen_v0[2] +
-                          barycentric[1] * screen_v1[2] +
-                          barycentric[2] * screen_v2[2];
+            float w0 = edge_function(p1, p2, p) / area;
+            float w1 = edge_function(p2, p0, p) / area;
+            float w2 = edge_function(p0, p1, p) / area;
 
-            int pixel_index = y * state.image_width + x;
-            if (depth < state.image_depth[pixel_index]) {
-                state.image_depth[pixel_index] = depth;
+            if (w0 >= 0 && w1 >= 0 && w2 >= 0) {
+                int pixel_index = y * state.image_width + x;
 
-                data_fragment fragment;
-                fragment.data = new float[state.floats_per_vertex];
+                // **Fix Perspective Depth Interpolation**
+                float z0 = v0.gl_Position[2] / v0.gl_Position[3];
+                float z1 = v1.gl_Position[2] / v1.gl_Position[3];
+                float z2 = v2.gl_Position[2] / v2.gl_Position[3];
 
-                // Correct Attribute Interpolation Handling
-                for (int i = 0; i < state.floats_per_vertex; i++) {
-                    switch (state.interp_rules[i]) {
-                        case interp_type::flat:
-                            // Use the attribute from the first vertex (v0)
-                            fragment.data[i] = v0.data[i];
-                            break;
+                float depth = w0 * z0 + w1 * z1 + w2 * z2;
 
-                        case interp_type::smooth: {
+                if (depth < state.image_depth[pixel_index]) {
+                    state.image_depth[pixel_index] = depth;
+
+                    // Allocate memory for interpolated attributes
+                    data_fragment fragment;
+                    fragment.data = new float[state.floats_per_vertex];
+
+                    // **Corrected Attribute Interpolation**
+                    for (int i = 0; i < state.floats_per_vertex; i++) {
+                        if (state.interp_rules[i] == interp_type::smooth) {
                             // Perspective-correct interpolation
-                            float w0 = v0.gl_Position[3], w1 = v1.gl_Position[3], w2 = v2.gl_Position[3];
-                            float inv_w = 1.0f / (barycentric[0] / w0 + barycentric[1] / w1 + barycentric[2] / w2);
-                            fragment.data[i] = inv_w * (
-                                (barycentric[0] * v0.data[i] / w0) +
-                                (barycentric[1] * v1.data[i] / w1) +
-                                (barycentric[2] * v2.data[i] / w2)
-                            );
-                            break;
+                            float w_div_z = w0 / v0.gl_Position[3] + w1 / v1.gl_Position[3] + w2 / v2.gl_Position[3];
+                            fragment.data[i] = (w0 * v0.data[i] / v0.gl_Position[3] +
+                                                w1 * v1.data[i] / v1.gl_Position[3] +
+                                                w2 * v2.data[i] / v2.gl_Position[3]) / w_div_z;
+                        } else if (state.interp_rules[i] == interp_type::noperspective) {
+                            // Image-space barycentric interpolation
+                            fragment.data[i] = w0 * v0.data[i] + w1 * v1.data[i] + w2 * v2.data[i];
+                        } else if (state.interp_rules[i] == interp_type::flat) {
+                            // Flat interpolation (first vertex attribute)
+                            fragment.data[i] = v0.data[i];
                         }
-
-                        case interp_type::noperspective:
-                            // Direct barycentric interpolation (without perspective correction)
-                            fragment.data[i] = barycentric[0] * v0.data[i] +
-                                               barycentric[1] * v1.data[i] +
-                                               barycentric[2] * v2.data[i];
-                            break;
-
-                        default:
-                            fragment.data[i] = 0;  // Handle invalid cases
-                            break;
                     }
+
+                    // Process the fragment
+                    data_output output;
+                    state.fragment_shader(fragment, output, state.uniform_data);
+
+                    int r = std::min(255, static_cast<int>(output.output_color[0] * 255));
+                    int g = std::min(255, static_cast<int>(output.output_color[1] * 255));
+                    int b = std::min(255, static_cast<int>(output.output_color[2] * 255));
+
+                    state.image_color[pixel_index] = make_pixel(r, g, b);
+
+                    // Cleanup allocated memory
+                    delete[] fragment.data;
                 }
-
-                // Call the fragment shader
-                data_output output;
-                state.fragment_shader(fragment, output, state.uniform_data);
-
-                // Convert color to pixel format
-                state.image_color[pixel_index] = make_pixel(
-                    (int)(output.output_color[0] * 255),
-                    (int)(output.output_color[1] * 255),
-                    (int)(output.output_color[2] * 255));
-
-                delete[] fragment.data;
             }
         }
     }
 }
-
-

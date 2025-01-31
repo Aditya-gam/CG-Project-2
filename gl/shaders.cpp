@@ -62,18 +62,16 @@ void vertex_shader_transform(const data_vertex& in, data_geometry& out,
     const vertex_p& v = *(const vertex_p*)in.data;
 
     // Apply the transformation matrix (Projection * ModelView * Vertex)
-    vec4 transformed = xform * vec4(v.position, 1.0f);
-
-    // **Perform Homogeneous Division**
-    if (transformed[3] != 0.0f) {
-        transformed[0] /= transformed[3];
-        transformed[1] /= transformed[3];
-        transformed[2] /= transformed[3];  // Depth normalization
+    out.gl_Position = xform * vec4(v.position, 1.0f);
+    
+    // Perform **homogeneous division** (perspective divide)
+    if (out.gl_Position[3] != 0.0f) {
+        out.gl_Position[0] /= out.gl_Position[3];
+        out.gl_Position[1] /= out.gl_Position[3];
+        out.gl_Position[2] /= out.gl_Position[3];  // Depth normalization
     }
-
-    // Assign the transformed vertex position
-    out.gl_Position = transformed;
 }
+
 
 // Simple fragment shader: set the fragment to red
 void fragment_shader_red(const data_fragment& in, data_output& out,
