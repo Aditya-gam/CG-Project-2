@@ -40,10 +40,8 @@ void initialize_render(driver_state& state, int width, int height)
 // -----------------------------------------------------------------------------
 // render: Render the geometry stored in the driver_state.
 // -----------------------------------------------------------------------------
-
 void render(driver_state& state, render_type type)
 {
-    // (The existing implementation remains unchanged.)
     if (state.num_vertices == 0 || state.floats_per_vertex == 0) {
         std::cout << "No vertex data available for rendering." << std::endl;
         return;
@@ -267,7 +265,8 @@ data_geometry perspective_interpolate(const data_geometry& in1, const data_geome
     for (int i = 0; i < MAX_FLOATS_PER_VERTEX; i++) {
         switch(interp_rules[i]) {
             case interp_type::flat:
-                // Flat interpolation: simply take the value from the first vertex.
+                // For flat interpolation, always use the attribute from the provoking vertex.
+                // (In our implementation the provoking vertex is the first vertex of the original triangle.)
                 result.data[i] = in1.data[i];
                 break;
             case interp_type::noperspective:
@@ -357,18 +356,26 @@ void clip_triangle(driver_state& state, const data_geometry& v0,
         clip_triangle(state, v0, v1, v2, face + 1);
     }
     else if (inside.size() == 2 && outside.size() == 1) {
-        // Two vertices are inside; compute intersections along the edges.
-        data_geometry new_v1 = perspective_interpolate(inside[0], outside[0],
-                                                       inside_d[0], outside_d[0],
-                                                       state.interp_rules, face);
-        data_geometry new_v2 = perspective_interpolate(inside[1], outside[0],
-                                                       inside_d[1], outside_d[0],
-                                                       state.interp_rules, face);
-        clip_triangle(state, inside[0], inside[1], new_v1, face + 1);
-        clip_triangle(state, inside[1], new_v1, new_v2, face + 1);
+        // TWO VERTICES INSIDE; the proper re‐triangulation must be performed.
+        // Let:
+        //    inside[0] = v0, inside[1] = v1, and outside[0] = v2.
+        // Compute the intersections on the edges (v0,v2) and (v1,v2).
+        data_geometry i0 = perspective_interpolate(inside[0], outside[0],
+                                                   inside_d[0], outside_d[0],
+                                                   state.interp_rules, face);
+        data_geometry i1 = perspective_interpolate(inside[1], outside[0],
+                                                   inside_d[1], outside_d[0],
+                                                   state.interp_rules, face);
+        // The clipped polygon is now a quadrilateral with vertices:
+        //    [inside[0], inside[1], i1, i0]
+        // We triangulate it into two triangles:
+        //    Triangle 1: (inside[0], inside[1], i1)
+        //    Triangle 2: (inside[0], i1, i0)
+        clip_triangle(state, inside[0], inside[1], i1, face + 1);
+        clip_triangle(state, inside[0], i1, i0, face + 1);
     }
     else if (inside.size() == 1 && outside.size() == 2) {
-        // One vertex is inside; compute intersections with both outside vertices.
+        // ONE VERTEX INSIDE; compute intersections with both outside vertices.
         data_geometry new_v1 = perspective_interpolate(inside[0], outside[0],
                                                        inside_d[0], outside_d[0],
                                                        state.interp_rules, face);
@@ -380,9 +387,9 @@ void clip_triangle(driver_state& state, const data_geometry& v0,
 }
 
 
-/**
- * Simple linear interpolation between two geometry vertices.
- */
+// -----------------------------------------------------------------------------
+// interpolate: Simple linear interpolation between two geometry vertices.
+// -----------------------------------------------------------------------------
 data_geometry interpolate(const data_geometry& a, const data_geometry& b, float t) {
     data_geometry result;
     result.gl_Position = a.gl_Position * (1 - t) + b.gl_Position * t;
