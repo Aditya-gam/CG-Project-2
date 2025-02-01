@@ -199,82 +199,78 @@ void render(driver_state& state, render_type type)
  * perspective_interpolate
  *
  * Given two geometry vertices (forming an edge that crosses a clipping plane),
- * this function computes the intersection vertex.
+ * compute the intersection vertex.
  *
- * For attributes marked as 'smooth', we use perspective–correct interpolation (using the
- * clip–space interpolation parameter t_clip computed from the clip–space distances).
+ * For attributes flagged as "smooth", we perform perspective–correct interpolation
+ * using the clip–space interpolation factor (t_clip). For attributes flagged as
+ * "noperspective", we compute an interpolation factor (t_ndc) based on the
+ * normalized device coordinates (NDC) of the two vertices relative to the current
+ * clip plane (indicated by 'face').
  *
- * For attributes marked as 'noperspective', we compute an interpolation parameter t_ndc
- * based on the normalized device coordinates (NDC) of the vertices with respect to the
- * current clipping plane. This ensures that non–perspective interpolation remains linear in
- * screen space.
- *
- * For flat interpolation, we simply take the attribute from the first vertex.
+ * For flat interpolation the value from the first vertex is used.
  *
  * Parameters:
  *   in1, in2       - The two geometry vertices defining the edge.
- *   d1, d2         - The signed distances of in1 and in2 from the current clip plane
- *                    (computed as dot(gl_Position, plane)).
- *   interp_rules   - The array of interpolation rules (one per attribute).
- *   face           - The index of the current clipping plane:
- *                      0: left, 1: right, 2: bottom, 3: top, 4: near, 5: far.
+ *   d1, d2         - The signed distances (dot(gl_Position, plane)) for in1 and in2.
+ *   interp_rules   - The interpolation rules for each attribute.
+ *   face           - The current clip plane index:
+ *                      0: Near, 1: Far, 2: Left, 3: Right, 4: Bottom, 5: Top.
  *
  * Returns:
- *   A new geometry vertex at the intersection of the edge with the clipping plane.
+ *   A new geometry vertex at the intersection of the edge with the clip plane.
  */
 data_geometry perspective_interpolate(const data_geometry& in1, const data_geometry& in2,
     float d1, float d2, const interp_type interp_rules[MAX_FLOATS_PER_VERTEX], int face)
 {
     data_geometry result;
-    // Compute the interpolation factor for smooth attributes from clip-space distances.
+
+    // Compute the clip-space interpolation factor.
     float t_clip = d1 / (d1 - d2);
 
     // For noperspective interpolation, compute the interpolation factor in NDC.
-    float t_ndc = t_clip; // Default value
+    float t_ndc = t_clip; // Default value.
     {
         vec4 ndc1 = in1.gl_Position / in1.gl_Position[3];
         vec4 ndc2 = in2.gl_Position / in2.gl_Position[3];
         switch(face) {
-            case 0: // Left plane: ndc.x >= -1
-                t_ndc = (ndc1[0] - (-1)) / (ndc1[0] - ndc2[0]);
-                break;
-            case 1: // Right plane: ndc.x <= 1
-                t_ndc = (1 - ndc1[0]) / (ndc2[0] - ndc1[0]);
-                break;
-            case 2: // Bottom plane: ndc.y >= -1
-                t_ndc = (ndc1[1] - (-1)) / (ndc1[1] - ndc2[1]);
-                break;
-            case 3: // Top plane: ndc.y <= 1
-                t_ndc = (1 - ndc1[1]) / (ndc2[1] - ndc1[1]);
-                break;
-            case 4: // Near plane: ndc.z >= -1
+            case 0: // Near plane: ndc.z >= -1
                 t_ndc = (ndc1[2] - (-1)) / (ndc1[2] - ndc2[2]);
                 break;
-            case 5: // Far plane: ndc.z <= 1
+            case 1: // Far plane: ndc.z <= 1
                 t_ndc = (1 - ndc1[2]) / (ndc2[2] - ndc1[2]);
+                break;
+            case 2: // Left plane: ndc.x >= -1
+                t_ndc = (ndc1[0] - (-1)) / (ndc1[0] - ndc2[0]);
+                break;
+            case 3: // Right plane: ndc.x <= 1
+                t_ndc = (1 - ndc1[0]) / (ndc2[0] - ndc1[0]);
+                break;
+            case 4: // Bottom plane: ndc.y >= -1
+                t_ndc = (ndc1[1] - (-1)) / (ndc1[1] - ndc2[1]);
+                break;
+            case 5: // Top plane: ndc.y <= 1
+                t_ndc = (1 - ndc1[1]) / (ndc2[1] - ndc1[1]);
                 break;
             default:
                 t_ndc = t_clip;
                 break;
         }
     }
+
     // Interpolate the clip-space position using t_clip.
     result.gl_Position = in1.gl_Position * (1 - t_clip) + in2.gl_Position * t_clip;
-    // Allocate memory for the interpolated attribute data.
+    // Allocate a new attribute array.
     result.data = new float[MAX_FLOATS_PER_VERTEX];
     for (int i = 0; i < MAX_FLOATS_PER_VERTEX; i++) {
         switch(interp_rules[i]) {
             case interp_type::flat:
-                // Flat interpolation: use the attribute from the first vertex.
                 result.data[i] = in1.data[i];
                 break;
             case interp_type::noperspective:
-                // Noperspective interpolation: use t_ndc computed from NDC.
                 result.data[i] = in1.data[i] * (1 - t_ndc) + in2.data[i] * t_ndc;
                 break;
             case interp_type::smooth:
                 {
-                    // Perspective-correct (smooth) interpolation.
                     float w1 = in1.gl_Position[3];
                     float w2 = in2.gl_Position[3];
                     float attr1 = in1.data[i] / w1;
@@ -285,7 +281,6 @@ data_geometry perspective_interpolate(const data_geometry& in1, const data_geome
                 }
                 break;
             default:
-                // Default to linear interpolation in clip space.
                 result.data[i] = in1.data[i] * (1 - t_clip) + in2.data[i] * t_clip;
                 break;
         }
@@ -295,23 +290,24 @@ data_geometry perspective_interpolate(const data_geometry& in1, const data_geome
 
 
 // -----------------------------------------------------------------------------
-// clip_triangle: Recursively clip a triangle (defined by vertices v0, v1, and v2)
-// against the six clip planes.
+// clip_triangle: Recursively clip a triangle against the canonical view volume.
 // -----------------------------------------------------------------------------
 /**
  * clip_triangle
  *
- * Clips a triangle against the canonical view volume by recursively processing
- * each of the six clipping planes. For each plane (indexed by 'face'), the signed
- * distances of the triangle’s vertices to the plane are computed and used to determine
- * which vertices lie inside or outside the half–space.
+ * Recursively clips a triangle (defined by vertices v0, v1, and v2) against the
+ * six clipping planes of the canonical view volume.
  *
- * When an edge crosses a clip plane, the new vertex is computed using the
- * perspective_interpolate function. (For attributes marked as noperspective, the
+ * When an edge crosses a clip plane the new vertex is computed using
+ * perspective_interpolate(). (For attributes flagged as noperspective the
  * interpolation factor is computed in NDC.)
  *
- * When all six clip planes have been processed (face == 6), the triangle is sent to
- * rasterize_triangle.
+ * When face == 6 (i.e. all clip planes have been processed) the triangle is passed
+ * to rasterize_triangle().
+ *
+ * NOTE: The only change in this function is the ordering of the clip planes.
+ * We now process the near and far planes first to ensure that perspective–correct
+ * interpolation is computed using the proper homogeneous coordinates.
  */
 void clip_triangle(driver_state& state, const data_geometry& v0,
                    const data_geometry& v1, const data_geometry& v2, int face)
@@ -320,18 +316,23 @@ void clip_triangle(driver_state& state, const data_geometry& v0,
         rasterize_triangle(state, v0, v1, v2);
         return;
     }
+
+    // --- MODIFIED CLIP PLANE ORDER ---
+    // New order: near, far, left, right, bottom, top.
+    vec4 planes[6] = {
+        vec4(0, 0, 1, 1),    // Near:   z + w >= 0
+        vec4(0, 0, -1, 1),   // Far:   -z + w >= 0
+        vec4(1, 0, 0, 1),    // Left:   x + w >= 0
+        vec4(-1, 0, 0, 1),   // Right: -x + w >= 0
+        vec4(0, 1, 0, 1),    // Bottom: y + w >= 0
+        vec4(0, -1, 0, 1)    // Top:    -y + w >= 0
+    };
+    // --------------------------------------------------------------------------
+
+    vec4 plane = planes[face];
+
     std::vector<data_geometry> inside, outside;
     std::vector<float> inside_d, outside_d;
-    // Define the six clip planes in clip space (A, B, C, D) so that A*x + B*y + C*z + D*w >= 0.
-    vec4 planes[6] = {
-        vec4(1, 0, 0, 1),   // Left:    x + w >= 0
-        vec4(-1, 0, 0, 1),  // Right:  -x + w >= 0
-        vec4(0, 1, 0, 1),   // Bottom:  y + w >= 0
-        vec4(0, -1, 0, 1),  // Top:    -y + w >= 0
-        vec4(0, 0, 1, 1),   // Near:   z + w >= 0
-        vec4(0, 0, -1, 1)   // Far:   -z + w >= 0
-    };
-    vec4 plane = planes[face];
     const data_geometry* vertices[3] = { &v0, &v1, &v2 };
     for (int i = 0; i < 3; i++) {
         float d = dot(vertices[i]->gl_Position, plane);
@@ -343,34 +344,31 @@ void clip_triangle(driver_state& state, const data_geometry& v0,
             outside_d.push_back(d);
         }
     }
+
     if (inside.size() == 3) {
-        // All vertices are inside; proceed with clipping against the next plane.
         clip_triangle(state, v0, v1, v2, face + 1);
     }
     else if (inside.size() == 2 && outside.size() == 1) {
-        // Two vertices are inside; compute intersections along the two edges that cross the plane.
         data_geometry new_v1 = perspective_interpolate(inside[0], outside[0],
                                                        inside_d[0], outside_d[0],
                                                        state.interp_rules, face);
         data_geometry new_v2 = perspective_interpolate(inside[1], outside[0],
                                                        inside_d[1], outside_d[0],
                                                        state.interp_rules, face);
-        // Form two new triangles from the resulting polygon.
         clip_triangle(state, inside[0], inside[1], new_v1, face + 1);
         clip_triangle(state, inside[1], new_v1, new_v2, face + 1);
     }
     else if (inside.size() == 1 && outside.size() == 2) {
-        // One vertex is inside; compute intersections with both outside vertices.
         data_geometry new_v1 = perspective_interpolate(inside[0], outside[0],
                                                        inside_d[0], outside_d[0],
                                                        state.interp_rules, face);
         data_geometry new_v2 = perspective_interpolate(inside[0], outside[1],
                                                        inside_d[0], outside_d[1],
                                                        state.interp_rules, face);
-        // The clipped triangle is defined by the inside vertex and the two intersection points.
         clip_triangle(state, inside[0], new_v1, new_v2, face + 1);
     }
 }
+
 
 /**
  * Simple linear interpolation between two geometry vertices.
@@ -386,7 +384,7 @@ data_geometry interpolate(const data_geometry& a, const data_geometry& b, float 
 }
 
 // -----------------------------------------------------------------------------
-// to_screen_space: Convert clip-space coordinates to screen-space, performing perspective division.
+// to_screen_space: Convert clip-space coordinates to screen-space by performing perspective division.
 // -----------------------------------------------------------------------------
 vec3 to_screen_space(const vec4& ndc, int width, int height) {
     return vec3(
@@ -415,13 +413,10 @@ vec3 compute_barycentric(const vec3& A, const vec3& B, const vec3& C, const vec3
 
 // -----------------------------------------------------------------------------
 // rasterize_triangle: Rasterize a triangle defined by three geometry vertices.
-// This function performs barycentric interpolation, calls the fragment shader,
-// and performs z-buffering.
 // -----------------------------------------------------------------------------
 void rasterize_triangle(driver_state& state, const data_geometry& v0,
                         const data_geometry& v1, const data_geometry& v2)
 {
-    // Use proper perspective division via to_screen_space to convert clip-space to screen-space.
     auto ndc_to_screen = [&](const vec4& v) -> vec3 {
         return to_screen_space(v, state.image_width, state.image_height);
     };
@@ -436,7 +431,7 @@ void rasterize_triangle(driver_state& state, const data_geometry& v0,
         return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
     };
     float area = edge_function(p0, p1, p2);
-    if (area == 0) return; // Skip degenerate triangles.
+    if (area == 0) return;
     for (int y = min_y; y <= max_y; y++) {
         for (int x = min_x; x <= max_x; x++) {
             vec3 p(x + 0.5f, y + 0.5f, 0);
@@ -445,14 +440,12 @@ void rasterize_triangle(driver_state& state, const data_geometry& v0,
             float w2 = edge_function(p0, p1, p) / area;
             if (w0 >= 0 && w1 >= 0 && w2 >= 0) {
                 int pixel_index = y * state.image_width + x;
-                // Compute depth using perspective-correct depth interpolation.
                 float z0 = v0.gl_Position[2] / v0.gl_Position[3];
                 float z1 = v1.gl_Position[2] / v1.gl_Position[3];
                 float z2 = v2.gl_Position[2] / v2.gl_Position[3];
                 float depth = w0 * z0 + w1 * z1 + w2 * z2;
                 if (depth < state.image_depth[pixel_index]) {
                     state.image_depth[pixel_index] = depth;
-                    // Allocate memory for the interpolated attributes.
                     data_fragment fragment;
                     fragment.data = new float[state.floats_per_vertex];
                     for (int i = 0; i < state.floats_per_vertex; i++) {
@@ -462,8 +455,6 @@ void rasterize_triangle(driver_state& state, const data_geometry& v0,
                                                 w1 * v1.data[i] / v1.gl_Position[3] +
                                                 w2 * v2.data[i] / v2.gl_Position[3]) / w_div_z;
                         } else if (state.interp_rules[i] == interp_type::noperspective) {
-                            // For noperspective interpolation during rasterization, we simply use
-                            // image-space barycentrics (which are already computed in w0, w1, w2).
                             fragment.data[i] = w0 * v0.data[i] + w1 * v1.data[i] + w2 * v2.data[i];
                         } else if (state.interp_rules[i] == interp_type::flat) {
                             fragment.data[i] = v0.data[i];
