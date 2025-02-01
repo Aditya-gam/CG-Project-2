@@ -4,6 +4,8 @@
 #include "common.h"
 #include "mat.h"
 #include <map>
+#include "shaders.h"  // Include the shaders so all function names are available
+
 
 // Vertex layout: each vertex stores only position, as a 3-vector
 struct vertex_p

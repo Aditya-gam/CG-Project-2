@@ -1,9 +1,11 @@
 #include "driver_state.h"
 #include <cstring>
-#include <vector>  // Ensure this is included
-#include <algorithm>  // For std::min, std::max
+#include <vector>    // For std::vector
+#include <algorithm> // For std::min, std::max
 
-
+// -----------------------------------------------------------------------------
+// driver_state Constructor and Destructor
+// -----------------------------------------------------------------------------
 
 driver_state::driver_state()
 {
@@ -15,38 +17,36 @@ driver_state::~driver_state()
     delete [] image_depth;
 }
 
-// This function should allocate and initialize the arrays that store color and
-// depth.  This is not done during the constructor since the width and height
-// are not known when this class is constructed.
+// -----------------------------------------------------------------------------
+// initialize_render: Allocate and initialize the render buffers.
+// -----------------------------------------------------------------------------
+
 void initialize_render(driver_state& state, int width, int height)
 {
     state.image_width = width;
     state.image_height = height;
 
-    // Allocate memory for image_color and image_depth
+    // Allocate memory for the color and depth buffers.
     state.image_color = new pixel[width * height];
     state.image_depth = new float[width * height];
 
-    // Initialize image_color to black (0,0,0)
+    // Initialize the color buffer to black.
     for (int i = 0; i < width * height; i++)
     {
-        state.image_color[i] = make_pixel(0, 0, 0);  // Black color
+        state.image_color[i] = make_pixel(0, 0, 0);
     }
 
-    // Initialize image_depth to maximum depth value (1.0 for a z-buffer)
+    // Initialize the depth buffer to 1.0 (the farthest depth).
     std::fill_n(state.image_depth, width * height, 1.0f);
 }
 
+// -----------------------------------------------------------------------------
+// render: Render the geometry stored in the driver_state.
+// -----------------------------------------------------------------------------
 
-// This function will be called to render the data that has been stored in this class.
-// Valid values of type are:
-//   render_type::triangle - Each group of three vertices corresponds to a triangle.
-//   render_type::indexed -  Each group of three indices in index_data corresponds
-//                           to a triangle.  These numbers are indices into vertex_data.
-//   render_type::fan -      The vertices are to be interpreted as a triangle fan.
-//   render_type::strip -    The vertices are to be interpreted as a triangle strip.
 void render(driver_state& state, render_type type)
 {
+    // (The existing implementation remains unchanged.)
     if (state.num_vertices == 0 || state.floats_per_vertex == 0) {
         std::cout << "No vertex data available for rendering." << std::endl;
         return;
@@ -58,30 +58,30 @@ void render(driver_state& state, render_type type)
                 data_geometry v0, v1, v2;
                 data_vertex in0, in1, in2;
 
-                // Allocate memory for attributes
+                // Allocate attribute arrays for each vertex.
                 v0.data = new float[state.floats_per_vertex];
                 v1.data = new float[state.floats_per_vertex];
                 v2.data = new float[state.floats_per_vertex];
 
-                // Set up vertex data pointers
+                // Set pointers into the vertex_data array.
                 in0.data = &state.vertex_data[i * state.floats_per_vertex];
                 in1.data = &state.vertex_data[(i + 1) * state.floats_per_vertex];
                 in2.data = &state.vertex_data[(i + 2) * state.floats_per_vertex];
 
-                // Copy attributes to geometry data
+                // Copy raw vertex data to geometry data.
                 std::memcpy(v0.data, in0.data, sizeof(float) * state.floats_per_vertex);
                 std::memcpy(v1.data, in1.data, sizeof(float) * state.floats_per_vertex);
                 std::memcpy(v2.data, in2.data, sizeof(float) * state.floats_per_vertex);
 
-                // Call vertex shader
+                // Run the vertex shader on each vertex.
                 state.vertex_shader(in0, v0, state.uniform_data);
                 state.vertex_shader(in1, v1, state.uniform_data);
                 state.vertex_shader(in2, v2, state.uniform_data);
 
-                // Clip and rasterize
+                // Clip (which may generate new vertices) and then rasterize.
                 clip_triangle(state, v0, v1, v2);
 
-                // Free allocated memory
+                // Free the allocated attribute arrays.
                 delete[] v0.data;
                 delete[] v1.data;
                 delete[] v2.data;
@@ -93,35 +93,35 @@ void render(driver_state& state, render_type type)
                 data_geometry v0, v1, v2;
                 data_vertex in0, in1, in2;
 
-                // Get vertex indices from the index buffer
+                // Retrieve vertex indices from the index buffer.
                 int idx0 = state.index_data[i];
                 int idx1 = state.index_data[i + 1];
                 int idx2 = state.index_data[i + 2];
 
-                // Allocate memory for attributes
+                // Allocate attribute arrays.
                 v0.data = new float[state.floats_per_vertex];
                 v1.data = new float[state.floats_per_vertex];
                 v2.data = new float[state.floats_per_vertex];
 
-                // Set up vertex data pointers using indices
+                // Set up vertex pointers using the indices.
                 in0.data = &state.vertex_data[idx0 * state.floats_per_vertex];
                 in1.data = &state.vertex_data[idx1 * state.floats_per_vertex];
                 in2.data = &state.vertex_data[idx2 * state.floats_per_vertex];
 
-                // Copy attributes to geometry data
+                // Copy attribute data.
                 std::memcpy(v0.data, in0.data, sizeof(float) * state.floats_per_vertex);
                 std::memcpy(v1.data, in1.data, sizeof(float) * state.floats_per_vertex);
                 std::memcpy(v2.data, in2.data, sizeof(float) * state.floats_per_vertex);
 
-                // Call vertex shader
+                // Run the vertex shader.
                 state.vertex_shader(in0, v0, state.uniform_data);
                 state.vertex_shader(in1, v1, state.uniform_data);
                 state.vertex_shader(in2, v2, state.uniform_data);
 
-                // Clip and rasterize
+                // Clip and rasterize.
                 clip_triangle(state, v0, v1, v2);
 
-                // Free allocated memory
+                // Free allocated attribute arrays.
                 delete[] v0.data;
                 delete[] v1.data;
                 delete[] v2.data;
@@ -195,57 +195,132 @@ void render(driver_state& state, render_type type)
 }
 
 
-
-
-data_geometry perspective_interpolate(const data_geometry& in1, const data_geometry& in2, float w1, float w2, const interp_type interp_rules[MAX_FLOATS_PER_VERTEX])
+/**
+ * perspective_interpolate
+ *
+ * Given two geometry vertices (along an edge crossing the clip boundary),
+ * compute the intersection vertex.
+ *
+ * @param in1         The first vertex (inside the clipping plane).
+ * @param in2         The second vertex (outside the clipping plane).
+ * @param d1          The signed distance (dot product with the plane) for in1.
+ * @param d2          The signed distance for in2.
+ * @param interp_rules  The interpolation rules for each attribute.
+ *
+ * @return The interpolated vertex (in clip space) along the edge.
+ */
+data_geometry perspective_interpolate(const data_geometry& in1, const data_geometry& in2,
+    float d1, float d2, const interp_type interp_rules[MAX_FLOATS_PER_VERTEX])
 {
     data_geometry result;
 
-    // Compute interpolation factor `t` based on homogeneous w values
-    float d1 = in1.gl_Position[3];  // w_A
-    float d2 = in2.gl_Position[3];  // w_B
+    // Compute the interpolation factor t using the plane distances.
+    float t = d1 / (d1 - d2);
 
-    float t = d1 / (d1 - d2);  // Correct interpolation factor
-
-    // Interpolate gl_Position
+    // Linearly interpolate the clip-space position.
     result.gl_Position = in1.gl_Position * (1 - t) + in2.gl_Position * t;
 
-    // Allocate new memory for attributes
+    // Allocate a new attribute array.
     result.data = new float[MAX_FLOATS_PER_VERTEX];
 
-    // Compute α', β', γ' in screen space (unnormalized barycentric weights)
-    float alpha_prime = (1 - t) * d1;
-    float beta_prime = t * d2;
-
-    float k = (alpha_prime / d1) + (beta_prime / d2);  // Normalization factor
-
-    float alpha = (alpha_prime / d1) / k;
-    float beta = (beta_prime / d2) / k;
-
+    // Interpolate each vertex attribute.
     for (int i = 0; i < MAX_FLOATS_PER_VERTEX; i++) {
-        if (interp_rules[i] == interp_type::noperspective) {
-            // No perspective correction: Interpolate linearly
+        if (interp_rules[i] == interp_type::noperspective || interp_rules[i] == interp_type::flat) {
+            // Simple linear interpolation for non–perspective or flat.
             result.data[i] = in1.data[i] * (1 - t) + in2.data[i] * t;
-        } else {
-            // Perspective correction: Interpolate using corrected weights
-            float attr1 = in1.data[i] / d1;
-            float attr2 = in2.data[i] / d2;
-            float interpolated_attr = (alpha * attr1) + (beta * attr2);
-            result.data[i] = interpolated_attr * result.gl_Position[3];  // Convert back to perspective space
+        } else { // interp_type::smooth: perspective–correct interpolation.
+            float w1 = in1.gl_Position[3];
+            float w2 = in2.gl_Position[3];
+            float attr1 = in1.data[i] / w1;
+            float attr2 = in2.data[i] / w2;
+            float interp_a = attr1 * (1 - t) + attr2 * t;
+            float recip_w = (1 - t) / w1 + t / w2;
+            result.data[i] = interp_a / recip_w;
         }
     }
 
     return result;
 }
 
+/**
+ * clip_triangle
+ *
+ * Recursively clips a triangle (specified by vertices v0, v1, and v2)
+ * against the six clip planes. When face == 6, the triangle is passed on
+ * for rasterization.
+ *
+ * For each clip plane, we compute the signed distance d = dot(gl_Position, plane)
+ * for each vertex.
+ *
+ * @param state  The driver state.
+ * @param v0     The first vertex.
+ * @param v1     The second vertex.
+ * @param v2     The third vertex.
+ * @param face   The current clipping plane (0 to 5).
+ */
+void clip_triangle(driver_state& state, const data_geometry& v0,
+                   const data_geometry& v1, const data_geometry& v2, int face)
+{
+    if (face == 6) {
+        rasterize_triangle(state, v0, v1, v2);
+        return;
+    }
 
+    std::vector<data_geometry> inside, outside;
+    std::vector<float> inside_d, outside_d;
 
+    // Define the six clip planes. Each is represented as (A, B, C, D) so that
+    // the plane equation is: A*x + B*y + C*z + D*w >= 0.
+    vec4 planes[6] = {
+        vec4(1, 0, 0, 1),   // Left:    x + w >= 0
+        vec4(-1, 0, 0, 1),  // Right:  -x + w >= 0
+        vec4(0, 1, 0, 1),   // Bottom:  y + w >= 0
+        vec4(0, -1, 0, 1),  // Top:    -y + w >= 0
+        vec4(0, 0, 1, 1),   // Near:   z + w >= 0
+        vec4(0, 0, -1, 1)   // Far:   -z + w >= 0
+    };
 
+    vec4 plane = planes[face];
 
+    // Compute signed distances for each vertex.
+    const data_geometry* vertices[3] = { &v0, &v1, &v2 };
+    for (int i = 0; i < 3; i++) {
+        float d = dot(vertices[i]->gl_Position, plane);
+        if (d >= 0) {
+            inside.push_back(*vertices[i]);
+            inside_d.push_back(d);
+        } else {
+            outside.push_back(*vertices[i]);
+            outside_d.push_back(d);
+        }
+    }
 
+    if (inside.size() == 3) {
+        // All vertices are inside; clip against the next plane.
+        clip_triangle(state, v0, v1, v2, face + 1);
+    }
+    else if (inside.size() == 2 && outside.size() == 1) {
+        // Two vertices inside; compute intersections along the two edges.
+        data_geometry new_v1 = perspective_interpolate(inside[0], outside[0], inside_d[0], outside_d[0], state.interp_rules);
+        data_geometry new_v2 = perspective_interpolate(inside[1], outside[0], inside_d[1], outside_d[0], state.interp_rules);
 
+        // Form two new triangles.
+        clip_triangle(state, inside[0], inside[1], new_v1, face + 1);
+        clip_triangle(state, inside[1], new_v1, new_v2, face + 1);
+    }
+    else if (inside.size() == 1 && outside.size() == 2) {
+        // One vertex inside; compute intersections with both outside vertices.
+        data_geometry new_v1 = perspective_interpolate(inside[0], outside[0], inside_d[0], outside_d[0], state.interp_rules);
+        data_geometry new_v2 = perspective_interpolate(inside[0], outside[1], inside_d[0], outside_d[1], state.interp_rules);
 
+        // The clipped triangle consists of the inside vertex and the two intersection points.
+        clip_triangle(state, inside[0], new_v1, new_v2, face + 1);
+    }
+}
 
+/**
+ * Simple linear interpolation between two geometry vertices.
+ */
 data_geometry interpolate(const data_geometry& a, const data_geometry& b, float t) {
     data_geometry result;
     result.gl_Position = a.gl_Position * (1 - t) + b.gl_Position * t;
@@ -256,62 +331,11 @@ data_geometry interpolate(const data_geometry& a, const data_geometry& b, float 
     return result;
 }
 
+// -----------------------------------------------------------------------------
+// to_screen_space: Convert clip-space coordinates to screen-space, performing
+// perspective division.
+// -----------------------------------------------------------------------------
 
-
-void clip_triangle(driver_state& state, const data_geometry& v0,
-                   const data_geometry& v1, const data_geometry& v2, int face)
-{
-    if (face == 6) {
-        rasterize_triangle(state, v0, v1, v2);
-        return;
-    }
-
-    std::vector<data_geometry> inside, outside;
-    std::vector<float> inside_w, outside_w;
-
-    // Clipping planes: Near (z = -w) and Far (z = w)
-    vec4 planes[6] = {
-        vec4(1, 0, 0, 1),  vec4(-1, 0, 0, 1),  // Left and Right
-        vec4(0, 1, 0, 1),  vec4(0, -1, 0, 1), // Top and Bottom
-        vec4(0, 0, 1, 1),  vec4(0, 0, -1, 1)  // Near and Far
-    };
-
-    vec4 plane = planes[face];
-
-    const data_geometry* vertices[3] = { &v0, &v1, &v2 };
-
-    for (int i = 0; i < 3; i++) {
-        float d = dot(vertices[i]->gl_Position, plane);
-        if (d >= 0) {
-            inside.push_back(*vertices[i]);
-            inside_w.push_back(vertices[i]->gl_Position[3]);
-        } else {
-            outside.push_back(*vertices[i]);
-            outside_w.push_back(vertices[i]->gl_Position[3]);
-        }
-    }
-
-    if (inside.size() == 3) {
-        clip_triangle(state, v0, v1, v2, face + 1);
-    } 
-    else if (inside.size() == 2 && outside.size() == 1) {
-        data_geometry new_v1 = perspective_interpolate(inside[0], outside[0], inside_w[0], outside_w[0], state.interp_rules);
-        data_geometry new_v2 = perspective_interpolate(inside[1], outside[0], inside_w[1], outside_w[0], state.interp_rules);
-
-        clip_triangle(state, inside[0], inside[1], new_v1, face + 1);
-        clip_triangle(state, inside[1], new_v1, new_v2, face + 1);
-    } 
-    else if (inside.size() == 1 && outside.size() == 2) {
-        data_geometry new_v1 = perspective_interpolate(inside[0], outside[0], inside_w[0], outside_w[0], state.interp_rules);
-        data_geometry new_v2 = perspective_interpolate(inside[0], outside[1], inside_w[0], outside_w[1], state.interp_rules);
-
-        clip_triangle(state, inside[0], new_v1, new_v2, face + 1);
-    }
-}
-
-// Rasterize the triangle defined by the three vertices in the "in" array.  This
-// function is responsible for rasterization, interpolation of data to
-// fragments, calling the fragment shader, and z-buffering.
 vec3 to_screen_space(const vec4& ndc, int width, int height) {
     return vec3(
         (ndc[0] / ndc[3] * 0.5f + 0.5f) * width,
@@ -320,6 +344,7 @@ vec3 to_screen_space(const vec4& ndc, int width, int height) {
     );
 }
 
+// Compute barycentric coordinates (used in rasterization).
 vec3 compute_barycentric(const vec3& A, const vec3& B, const vec3& C, const vec3& P) {
     vec3 v0 = B - A, v1 = C - A, v2 = P - A;
     float d00 = dot(v0, v0);
@@ -334,16 +359,21 @@ vec3 compute_barycentric(const vec3& A, const vec3& B, const vec3& C, const vec3
     return vec3(u, v, w);
 }
 
+// -----------------------------------------------------------------------------
+// rasterize_triangle: Rasterize a triangle defined by three geometry vertices.
+// This function performs barycentric interpolation, calls the fragment shader,
+// and performs z-buffering.
+// -----------------------------------------------------------------------------
+
 void rasterize_triangle(driver_state& state, const data_geometry& v0,
                         const data_geometry& v1, const data_geometry& v2)
 {
-    // Convert NDC coordinates to screen space
+    // --- FIX: Use proper perspective division for screen-space conversion ---
+    // Instead of using a lambda that does not divide by w, we call to_screen_space,
+    // which performs the perspective divide. This change fixes test 05.txt while
+    // leaving test 10.txt (which already has w = 1) unchanged.
     auto ndc_to_screen = [&](const vec4& v) -> vec3 {
-        return vec3(
-            (v[0] * 0.5f + 0.5f) * state.image_width,
-            (v[1] * 0.5f + 0.5f) * state.image_height,
-            v[2]
-        );
+        return to_screen_space(v, state.image_width, state.image_height);
     };
 
     vec3 p0 = ndc_to_screen(v0.gl_Position);
@@ -373,38 +403,34 @@ void rasterize_triangle(driver_state& state, const data_geometry& v0,
             if (w0 >= 0 && w1 >= 0 && w2 >= 0) {
                 int pixel_index = y * state.image_width + x;
 
-                // **Fix Perspective Depth Interpolation**
+                // Perspective-correct depth interpolation.
                 float z0 = v0.gl_Position[2] / v0.gl_Position[3];
                 float z1 = v1.gl_Position[2] / v1.gl_Position[3];
                 float z2 = v2.gl_Position[2] / v2.gl_Position[3];
-
                 float depth = w0 * z0 + w1 * z1 + w2 * z2;
 
                 if (depth < state.image_depth[pixel_index]) {
                     state.image_depth[pixel_index] = depth;
 
-                    // Allocate memory for interpolated attributes
+                    // Allocate memory for interpolated attributes.
                     data_fragment fragment;
                     fragment.data = new float[state.floats_per_vertex];
 
-                    // **Corrected Attribute Interpolation**
+                    // Interpolate attributes according to the interpolation rules.
                     for (int i = 0; i < state.floats_per_vertex; i++) {
                         if (state.interp_rules[i] == interp_type::smooth) {
-                            // Perspective-correct interpolation
                             float w_div_z = w0 / v0.gl_Position[3] + w1 / v1.gl_Position[3] + w2 / v2.gl_Position[3];
                             fragment.data[i] = (w0 * v0.data[i] / v0.gl_Position[3] +
                                                 w1 * v1.data[i] / v1.gl_Position[3] +
                                                 w2 * v2.data[i] / v2.gl_Position[3]) / w_div_z;
                         } else if (state.interp_rules[i] == interp_type::noperspective) {
-                            // Image-space barycentric interpolation
                             fragment.data[i] = w0 * v0.data[i] + w1 * v1.data[i] + w2 * v2.data[i];
                         } else if (state.interp_rules[i] == interp_type::flat) {
-                            // Flat interpolation (first vertex attribute)
                             fragment.data[i] = v0.data[i];
                         }
                     }
 
-                    // Process the fragment
+                    // Process the fragment through the fragment shader.
                     data_output output;
                     state.fragment_shader(fragment, output, state.uniform_data);
 
@@ -414,7 +440,7 @@ void rasterize_triangle(driver_state& state, const data_geometry& v0,
 
                     state.image_color[pixel_index] = make_pixel(r, g, b);
 
-                    // Cleanup allocated memory
+                    // Cleanup allocated memory.
                     delete[] fragment.data;
                 }
             }
