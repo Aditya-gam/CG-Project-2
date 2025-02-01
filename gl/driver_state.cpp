@@ -199,21 +199,23 @@ void render(driver_state& state, render_type type)
  * perspective_interpolate
  *
  * Given two geometry vertices (forming an edge that crosses a clipping plane),
- * compute the intersection vertex.
+ * this function computes the intersection vertex.
  *
- * For attributes flagged as "smooth", we perform perspective–correct interpolation
- * using the clip–space interpolation factor (t_clip). For attributes flagged as
- * "noperspective", we compute an interpolation factor (t_ndc) based on the
- * normalized device coordinates (NDC) of the two vertices relative to the current
- * clip plane (indicated by 'face').
+ * For attributes flagged as "smooth", perspective–correct interpolation is performed
+ * using the clip–space interpolation factor t_clip (computed from the clip–space distances).
  *
- * For flat interpolation the value from the first vertex is used.
+ * For attributes flagged as "noperspective", an interpolation factor t_ndc is computed
+ * in normalized device coordinates (NDC) using the appropriate coordinate for the current
+ * clip plane (determined by the parameter 'face'). This ensures that non–perspective
+ * interpolation remains linear in screen space.
+ *
+ * For flat interpolation the attribute from the first vertex is used.
  *
  * Parameters:
  *   in1, in2       - The two geometry vertices defining the edge.
  *   d1, d2         - The signed distances (dot(gl_Position, plane)) for in1 and in2.
- *   interp_rules   - The interpolation rules for each attribute.
- *   face           - The current clip plane index:
+ *   interp_rules   - The interpolation rules (one per attribute).
+ *   face           - The index of the current clip plane:
  *                      0: Near, 1: Far, 2: Left, 3: Right, 4: Bottom, 5: Top.
  *
  * Returns:
@@ -224,16 +226,17 @@ data_geometry perspective_interpolate(const data_geometry& in1, const data_geome
 {
     data_geometry result;
 
-    // Compute the clip-space interpolation factor.
+    // Compute the clip–space interpolation factor.
     float t_clip = d1 / (d1 - d2);
 
     // For noperspective interpolation, compute the interpolation factor in NDC.
     float t_ndc = t_clip; // Default value.
     {
+        // Compute normalized device coordinates for both vertices.
         vec4 ndc1 = in1.gl_Position / in1.gl_Position[3];
         vec4 ndc2 = in2.gl_Position / in2.gl_Position[3];
         switch(face) {
-            case 0: // Near plane: ndc.z >= -1
+            case 0: // Near plane: use z coordinate, expected ndc.z >= -1
                 t_ndc = (ndc1[2] - (-1)) / (ndc1[2] - ndc2[2]);
                 break;
             case 1: // Far plane: ndc.z <= 1
@@ -257,20 +260,23 @@ data_geometry perspective_interpolate(const data_geometry& in1, const data_geome
         }
     }
 
-    // Interpolate the clip-space position using t_clip.
+    // Interpolate the clip–space position using t_clip.
     result.gl_Position = in1.gl_Position * (1 - t_clip) + in2.gl_Position * t_clip;
-    // Allocate a new attribute array.
+    // Allocate memory for the interpolated attribute data.
     result.data = new float[MAX_FLOATS_PER_VERTEX];
     for (int i = 0; i < MAX_FLOATS_PER_VERTEX; i++) {
         switch(interp_rules[i]) {
             case interp_type::flat:
+                // Flat interpolation: simply take the value from the first vertex.
                 result.data[i] = in1.data[i];
                 break;
             case interp_type::noperspective:
+                // Noperspective interpolation: use the NDC–based interpolation factor.
                 result.data[i] = in1.data[i] * (1 - t_ndc) + in2.data[i] * t_ndc;
                 break;
             case interp_type::smooth:
                 {
+                    // Perspective–correct (smooth) interpolation.
                     float w1 = in1.gl_Position[3];
                     float w2 = in2.gl_Position[3];
                     float attr1 = in1.data[i] / w1;
@@ -281,6 +287,7 @@ data_geometry perspective_interpolate(const data_geometry& in1, const data_geome
                 }
                 break;
             default:
+                // Default to linear interpolation.
                 result.data[i] = in1.data[i] * (1 - t_clip) + in2.data[i] * t_clip;
                 break;
         }
@@ -302,12 +309,12 @@ data_geometry perspective_interpolate(const data_geometry& in1, const data_geome
  * perspective_interpolate(). (For attributes flagged as noperspective the
  * interpolation factor is computed in NDC.)
  *
- * When face == 6 (i.e. all clip planes have been processed) the triangle is passed
+ * When face == 6 (i.e. all clip planes have been processed) the triangle is sent
  * to rasterize_triangle().
  *
- * NOTE: The only change in this function is the ordering of the clip planes.
- * We now process the near and far planes first to ensure that perspective–correct
- * interpolation is computed using the proper homogeneous coordinates.
+ * NOTE: The clip plane order has been changed so that the near and far planes are
+ * processed first. This ensures that the proper homogeneous coordinates are used
+ * for perspective–correct interpolation.
  */
 void clip_triangle(driver_state& state, const data_geometry& v0,
                    const data_geometry& v1, const data_geometry& v2, int face)
@@ -318,7 +325,7 @@ void clip_triangle(driver_state& state, const data_geometry& v0,
     }
 
     // --- MODIFIED CLIP PLANE ORDER ---
-    // New order: near, far, left, right, bottom, top.
+    // New order: 0: Near, 1: Far, 2: Left, 3: Right, 4: Bottom, 5: Top.
     vec4 planes[6] = {
         vec4(0, 0, 1, 1),    // Near:   z + w >= 0
         vec4(0, 0, -1, 1),   // Far:   -z + w >= 0
@@ -346,9 +353,11 @@ void clip_triangle(driver_state& state, const data_geometry& v0,
     }
 
     if (inside.size() == 3) {
+        // All vertices are inside; proceed with clipping against the next plane.
         clip_triangle(state, v0, v1, v2, face + 1);
     }
     else if (inside.size() == 2 && outside.size() == 1) {
+        // Two vertices are inside; compute intersections along the edges.
         data_geometry new_v1 = perspective_interpolate(inside[0], outside[0],
                                                        inside_d[0], outside_d[0],
                                                        state.interp_rules, face);
@@ -359,6 +368,7 @@ void clip_triangle(driver_state& state, const data_geometry& v0,
         clip_triangle(state, inside[1], new_v1, new_v2, face + 1);
     }
     else if (inside.size() == 1 && outside.size() == 2) {
+        // One vertex is inside; compute intersections with both outside vertices.
         data_geometry new_v1 = perspective_interpolate(inside[0], outside[0],
                                                        inside_d[0], outside_d[0],
                                                        state.interp_rules, face);
